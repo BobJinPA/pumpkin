@@ -77,12 +77,13 @@ bool inProgress;
 bool onStart = false;
 bool onEnd = false;
 
-void IRAM_ATTR isr0() {  // fires when onEnd is detected. checks twice to make sure the ball does not skip past the end
+void IRAM_ATTR isr0() {  // fires when onStart goes low
   intStartMillis = millis();
   onStart = false;
 }
 
-// interrupt functions for end and razz
+// interrupt functions for end 
+// TO DO confirm this isn't garbage - what is the ball simply lands and has no signal bounce
 void IRAM_ATTR isr1() {  // fires when onEnd is detected. checks twice to make sure the ball does not skip past the end
   onEnd_time = millis();
   if (onEnd_time - previous_onEnd_time > 250) {
@@ -98,14 +99,14 @@ void IRAM_ATTR isr2() {  // fires when razz is detected. Does not check twice; w
 
 String getTime() {
   currentMillis = millis();
-  return String((currentMillis - intStartMillis) / 100);
+  return String((currentMillis - intStartMillis) / 100); // TO DO return string(float as tenth of second)
 }
 
 void updateDisplay(String displayValue) {
   displaySerial.println(displayValue);  // send serial to displaySerial
 }
 
-bool playingTrack() {
+bool playingTrack() { // TO DO change to isPlayingTrack
   int status = myDFPlayer.readState();
   if (status == 513) {
     return true;
@@ -119,6 +120,13 @@ void controlServos() {  // revisit this hot garbage
   Serial.print(map(accelData.x, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX));
   Serial.print(", Y: ");
   Serial.print(map(accelData.y, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX));
+  // Simple jittery code
+  pwm0 = map(accelData.x, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
+  pca9685.setPWM(SER0, 0, pwm0);
+  pwm1 = map(accelData.y, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
+  pca9685.setPWM(SER1, 0, pwm1);
+
+  //TO DO Defuck the jittery code here
 
   // xVal = accelData.x;
   // if (previousXVal == 0) { previousXVal = xVal; }
@@ -152,10 +160,7 @@ void controlServos() {  // revisit this hot garbage
   // }
   // pca9685.setPWM(SER1, 0, pwm1);
 
-  pwm0 = map(accelData.x, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  pca9685.setPWM(SER0, 0, pwm0);
-  pwm1 = map(accelData.y, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  pca9685.setPWM(SER1, 0, pwm1);
+
 }
 
 void centerServos() {  // goal here is to keep the board from going crazy when the maze is complete
@@ -195,7 +200,7 @@ void setup() {
   Serial.println("Turning on");                    // for debugging
   playerSerial.begin(9600, SERIAL_8N1, 16, 17);    // RX=16, TX=17
   displaySerial.begin(38400, SERIAL_8N1, 26, 27);  //only using 27 TX. No incoming messages but needed to define both
-  delay(1000);
+  //delay(1000);
   Serial.println("Starting DFPlayer");
   if (!myDFPlayer.begin(playerSerial)) {
     Serial.println("Unable to begin DFPlayer Mini:");
@@ -218,17 +223,17 @@ void setup() {
   pinMode(STARTPIN, INPUT_PULLUP);
   pinMode(ENDPIN, INPUT_PULLUP);
   pinMode(RAZZPIN, INPUT_PULLUP);
-  attachInterrupt(STARTPIN, isr1, FALLING);
+  attachInterrupt(STARTPIN, isr0, FALLING);
   attachInterrupt(ENDPIN, isr1, RISING);
   attachInterrupt(RAZZPIN, isr2, RISING);
 
   updateDisplay("Starting");
-  delay(1000);
+  //delay(1000);
 }
 
 void loop() {
 
-  onStart = !(digitalRead(STARTPIN));
+  onStart = !(digitalRead(STARTPIN)); //TO DO: is this dumb?
 
   if (onStart) {  // ready to start
     onEnd = false;
@@ -259,7 +264,7 @@ void loop() {
       isProgressing = true;
     } else {  // normal non razzed in progress state - Razz is false
       if (!playingTrack()) {
-        myDFPlayer.play(2);
+        myDFPlayer.play(2); // TO DO: consider how to make the song resume from last position if razzed
       }
     }
 
