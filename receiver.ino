@@ -1,4 +1,4 @@
-// to consider
+// TO DO consider
 // when ball is taken off end to be placed on start. What do the motors do. they may go crazy and start movin based on the position of the accel.
 // either handle in code, hardware, or behavior BJ 10/14
 
