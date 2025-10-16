@@ -44,7 +44,7 @@ Adafruit_PWMServoDriver pca9685 = Adafruit_PWMServoDriver(0x40);
 #define SERVOMAX 390  // Maximum value
 
 #define SERVO_CENTER0 342  // adjust to center board 0 x
-#define SERVO_CENTER1 327  // adjust to center board 1 y
+#define SERVO_CENTER1 340  // adjust to center board 1 y
 
 #define SER0 0  // Servo Motor 0 on connector 0
 #define SER1 1  // Servo Motor 1 on connector 1
