@@ -284,7 +284,7 @@ void setup() {
   pca9685.setPWM(SER0, 0, SERVO_CENTER0);
   pca9685.setPWM(SER1, 0, SERVO_CENTER1);
   
-  updateDisplay("Starting");
+  updateDisplay("START");  // Shortened for better display
   delay(500);
 }
 
