@@ -365,6 +365,10 @@ void loop() {
       while (gameState == ENDED) {
         ballOnEnd = (digitalRead(ENDPIN) == HIGH);
         
+        // Reset smoothing filters to prevent accumulated tilt during ball transfer
+        smoothedX = 0;
+        smoothedY = 0;
+        
         if (ballOnEnd) {
           // Ball still on end - keep track 3 playing/looping
           if (!isPlayingTrack()) {
@@ -379,6 +383,11 @@ void loop() {
             isProgressing = false;
             razz = false;
             isRazzing = false;
+            // Reset PWM tracking to center position
+            pwm0 = SERVO_CENTER0;
+            pwm1 = SERVO_CENTER1;
+            targetPwm0 = SERVO_CENTER0;
+            targetPwm1 = SERVO_CENTER1;
             Serial.println("Reset to start - ready for new game");
             updateDisplay("Ready!");
             break;
@@ -391,6 +400,11 @@ void loop() {
             isProgressing = false;
             razz = false;
             isRazzing = false;
+            // Reset PWM tracking to center position
+            pwm0 = SERVO_CENTER0;
+            pwm1 = SERVO_CENTER1;
+            targetPwm0 = SERVO_CENTER0;
+            targetPwm1 = SERVO_CENTER1;
             Serial.println("Reset to start - ready for new game");
             updateDisplay("Ready!");
             break;
