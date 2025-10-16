@@ -298,24 +298,54 @@ void loop() {
       Serial.println("Game ended!");
       String finalTime = getTime();
       updateDisplay(finalTime);
-      myDFPlayer.play(3);
+      
+      // Center servos and hold position
       centerServos();
       
-      // Wait for servos to center before checking for restart
+      // Play end track once
+      myDFPlayer.play(3);
+      Serial.print("Final time: ");
+      Serial.println(finalTime);
+      
+      // Wait for servos to center and track to start
       delay(1000);
       
-      // Stay in ENDED state until ball is placed back on start
+      // Stay in ENDED state until ball is removed from end
       while (gameState == ENDED) {
-        ballOnStart = (digitalRead(STARTPIN) == LOW);
-        if (ballOnStart) {
-          gameState = WAITING_FOR_START;
-          isProgressing = false;
-          razz = false;
-          isRazzing = false;
-          Serial.println("Reset to start - ready for new game");
-          updateDisplay("Ready!");
-          break;
+        ballOnEnd = (digitalRead(ENDPIN) == HIGH);
+        
+        if (ballOnEnd) {
+          // Ball still on end - keep track 3 playing/looping
+          if (!isPlayingTrack()) {
+            myDFPlayer.play(3);
+            Serial.println("Track 3 completed - restarting");
+          }
+          
+          // Check for ball on start to reset
+          ballOnStart = (digitalRead(STARTPIN) == LOW);
+          if (ballOnStart) {
+            gameState = WAITING_FOR_START;
+            isProgressing = false;
+            razz = false;
+            isRazzing = false;
+            Serial.println("Reset to start - ready for new game");
+            updateDisplay("Ready!");
+            break;
+          }
+        } else {
+          // Ball removed from end - wait for it to be placed on start
+          ballOnStart = (digitalRead(STARTPIN) == LOW);
+          if (ballOnStart) {
+            gameState = WAITING_FOR_START;
+            isProgressing = false;
+            razz = false;
+            isRazzing = false;
+            Serial.println("Reset to start - ready for new game");
+            updateDisplay("Ready!");
+            break;
+          }
         }
+        
         delay(100);
       }
       break;
