@@ -1,7 +1,5 @@
-// TO DO consider
-// when ball is taken off end to be placed on start. What do the motors do. they may go crazy and start movin based on the position of the accel.
-// either handle in code, hardware, or behavior BJ 10/14
-
+// Ball Maze Controller with ESP-NOW
+// Improved state machine and debouncing logic
 
 // files on SD for DFPlayer
 // 1 - ready to start
@@ -18,7 +16,7 @@
 #include "DFRobotDFPlayerMini.h"
 
 HardwareSerial playerSerial(1);   // Use UART1 on ESP32
-HardwareSerial displaySerial(2);  // Use UART2 on ESP32 - make sure correct BAUD for ard
+HardwareSerial displaySerial(2);  // Use UART2 on ESP32
 
 DFRobotDFPlayerMini myDFPlayer;
 
@@ -37,155 +35,125 @@ Adafruit_PWMServoDriver pca9685 = Adafruit_PWMServoDriver(0x40);
 #define SERVO_CENTER0 342  // adjust to center board 0 x
 #define SERVO_CENTER1 327  // adjust to center board 1 y
 
-#define SER0 0  //Servo Motor 0 on connector 0
-#define SER1 1  //Servo Motor 1 on connector 1
-int pwm0;       // PWM to drive servos - gets fed into the motor after mapping he xval changes
+#define SER0 0  // Servo Motor 0 on connector 0
+#define SER1 1  // Servo Motor 1 on connector 1
+int pwm0;       // PWM to drive servos
 int pwm1;
 
 #define MAXDIFF 15  // to limit really rapid changes
-int xVal;
-int yVal;
-int previousXVal = 0;
-int previousYVal = 0;
-
 const int SENSOR_RANGE = 50;
 
 #define STARTPIN 18
 #define ENDPIN 19
 #define RAZZPIN 25
 
-int status;
+// Game state machine
+enum GameState {
+  WAITING_FOR_START,
+  IN_PROGRESS,
+  ENDED
+};
+
+GameState gameState = WAITING_FOR_START;
+
+// State flags
+bool isProgressing = false;
 bool razz = false;
 bool isRazzing = false;
-unsigned long razzStartTime;
-bool isProgressing = false;
 
-static bool hasEnded = false;
+// Timing variables for interrupts
+volatile unsigned long onEnd_time = 0;
+volatile unsigned long previous_onEnd_time = 0;
+volatile unsigned long razz_time = 0;
+volatile unsigned long previous_razz_time = 0;
+
+unsigned long intStartMillis = 0;
+
+// Start detection with polling
+bool wasBallOnStart = false;
 
 // callback function that will be executed when data is received
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   memcpy(&accelData, incomingData, sizeof(accelData));
 }
 
-//variables to keep track of the timing of recent interrupts
-unsigned long onEnd_time = 0;
-unsigned long previous_onEnd_time = 0;
-
-unsigned long intStartMillis;
-unsigned long currentMillis;
-bool inProgress;
-bool onStart = false;
-bool onEnd = false;
-
-void IRAM_ATTR isr0() {  // fires when onStart goes low
-  intStartMillis = millis();
-  onStart = false;
-}
-
-// interrupt functions for end 
-// TO DO confirm this isn't garbage - what is the ball simply lands and has no signal bounce
-void IRAM_ATTR isr1() {  // fires when onEnd is detected. checks twice to make sure the ball does not skip past the end
+// Interrupt for end position (with debouncing)
+void IRAM_ATTR isr1() {
   onEnd_time = millis();
   if (onEnd_time - previous_onEnd_time > 250) {
-    onEnd = true;
+    if (gameState == IN_PROGRESS) {
+      gameState = ENDED;
+    }
     previous_onEnd_time = onEnd_time;
   }
 }
 
-void IRAM_ATTR isr2() {  // fires when razz is detected. Does not check twice; want it to fire if touched even for a second
-  razz = true;
-  razzStartTime = millis();
-}
-
-String getTime() {
-  currentMillis = millis();
-  return String((currentMillis - intStartMillis) / 100); // TO DO return string(float as tenth of second)
-}
-
-void updateDisplay(String displayValue) {
-  displaySerial.println(displayValue);  // send serial to displaySerial
-}
-
-bool playingTrack() { // TO DO change to isPlayingTrack
-  int status = myDFPlayer.readState();
-  if (status == 513) {
-    return true;
-  } else {
-    return false;
+// Interrupt for razz detection (with debouncing)
+void IRAM_ATTR isr2() {
+  razz_time = millis();
+  if (razz_time - previous_razz_time > 100) {
+    razz = true;
+    previous_razz_time = razz_time;
   }
 }
 
-void controlServos() {  // revisit this hot garbage
-  Serial.print("X: ");
-  Serial.print(map(accelData.x, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX));
-  Serial.print(", Y: ");
-  Serial.print(map(accelData.y, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX));
-  // Simple jittery code
-  pwm0 = map(accelData.x, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  pca9685.setPWM(SER0, 0, pwm0);
-  pwm1 = map(accelData.y, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  pca9685.setPWM(SER1, 0, pwm1);
-
-  //TO DO Defuck the jittery code here
-
-  // xVal = accelData.x;
-  // if (previousXVal == 0) { previousXVal = xVal; }
-  // int xDiff = previousXVal - xVal;
-
-  // if (abs(xDiff) > MAXDIFF && xDiff > 0) {  // review this part. > or <
-  //   previousXVal = xVal + MAXDIFF;
-  //   pwm0 = map(previousXVal, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  // } else if (abs(xDiff) > MAXDIFF && xDiff > 0) {
-  //   previousXVal = xVal - MAXDIFF;
-  //   pwm0 = map(previousXVal, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  // } else {
-  //   previousXVal = xVal;
-  //   pwm0 = map(xVal, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  // }
-  // pca9685.setPWM(SER0, 0, pwm0);
-
-  // yVal = accelData.y;
-  // int yDiff = previousYVal - yVal;
-  // if (previousYVal == 0) { previousYVal = yVal; }
-
-  // if (abs(yDiff) > MAXDIFF && yDiff > 0) {
-  //   previousYVal = yVal + MAXDIFF;
-  //   pwm1 = map(previousYVal, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  // } else if (abs(yDiff) > MAXDIFF && xDiff > 0) {
-  //   previousYVal = yVal - MAXDIFF;
-  //   pwm1 = map(previousYVal, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  // } else {
-  //   previousYVal = yVal;
-  //   pwm1 = map(yVal, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  // }
-  // pca9685.setPWM(SER1, 0, pwm1);
-
-
+String getTime() {
+  unsigned long currentMillis = millis();
+  float seconds = (currentMillis - intStartMillis) / 1000.0;
+  return String(seconds, 1);  // Returns time with 1 decimal place
 }
 
-void centerServos() {  // goal here is to keep the board from going crazy when the maze is complete
+void updateDisplay(String displayValue) {
+  displaySerial.println(displayValue);
+}
+
+bool isPlayingTrack() {
+  int status = myDFPlayer.readState();
+  return (status == 513);
+}
+
+void controlServos() {
+  Serial.print("X: ");
+  Serial.print(accelData.x);
+  Serial.print(" -> PWM: ");
+  Serial.print(map(accelData.x, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX));
+  Serial.print(", Y: ");
+  Serial.print(accelData.y);
+  Serial.print(" -> PWM: ");
+  Serial.println(map(accelData.y, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX));
+  
+  pwm0 = map(accelData.x, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
+  pca9685.setPWM(SER0, 0, pwm0);
+  
+  pwm1 = map(accelData.y, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
+  pca9685.setPWM(SER1, 0, pwm1);
+}
+
+void centerServos() {
+  // Smoothly move servos to center position
   delay(40);
-  bool done = false;
-  // Use pwm0/pwm1 instead of xVal/yVal
+  
+  // Center X axis
   if (pwm0 > SERVO_CENTER0) {
-    for (int x = pwm0; x >= SERVO_CENTER0; x = x - 5) {
+    for (int x = pwm0; x >= SERVO_CENTER0; x -= 5) {
       pca9685.setPWM(SER0, 0, x);
       delay(40);
     }
   } else if (pwm0 < SERVO_CENTER0) {
-    for (int x = pwm0; x <= SERVO_CENTER0; x = x + 5) {
+    for (int x = pwm0; x <= SERVO_CENTER0; x += 5) {
       pca9685.setPWM(SER0, 0, x);
       delay(40);
     }
   }
 
+  // Center Y axis
   if (pwm1 > SERVO_CENTER1) {
-    for (int y = pwm1; y >= SERVO_CENTER1; y = y - 5) {
+    for (int y = pwm1; y >= SERVO_CENTER1; y -= 5) {
       pca9685.setPWM(SER1, 0, y);
       delay(40);
     }
   } else if (pwm1 < SERVO_CENTER1) {
-    for (int y = pwm1; y <= SERVO_CENTER1; y = y + 5) {
+    for (int y = pwm1; y <= SERVO_CENTER1; y += 5) {
       pca9685.setPWM(SER1, 0, y);
       delay(40);
     }
@@ -193,21 +161,28 @@ void centerServos() {  // goal here is to keep the board from going crazy when t
 
   pca9685.setPWM(SER0, 0, SERVO_CENTER0);
   pca9685.setPWM(SER1, 0, SERVO_CENTER1);
+  
+  // Update PWM tracking variables
+  pwm0 = SERVO_CENTER0;
+  pwm1 = SERVO_CENTER1;
 }
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Turning on");                    // for debugging
+  Serial.println("Turning on");
+  
   playerSerial.begin(9600, SERIAL_8N1, 16, 17);    // RX=16, TX=17
-  displaySerial.begin(38400, SERIAL_8N1, 26, 27);  //only using 27 TX. No incoming messages but needed to define both
-  //delay(1000);
+  displaySerial.begin(38400, SERIAL_8N1, 26, 27);  // TX=27
+  
+  delay(500);
   Serial.println("Starting DFPlayer");
   if (!myDFPlayer.begin(playerSerial)) {
     Serial.println("Unable to begin DFPlayer Mini:");
     Serial.println("1. Check wiring!");
     Serial.println("2. Insert SD card!");
-    while (true)
-      ;
+    while (true) {
+      delay(1000);
+    }
   }
   myDFPlayer.volume(30);  // Volume 0–30
 
@@ -217,79 +192,117 @@ void setup() {
     return;
   }
   esp_now_register_recv_cb(esp_now_recv_cb_t(OnDataRecv));
+  
   pca9685.begin();
   pca9685.setPWMFreq(50);
 
   pinMode(STARTPIN, INPUT_PULLUP);
   pinMode(ENDPIN, INPUT_PULLUP);
   pinMode(RAZZPIN, INPUT_PULLUP);
-  attachInterrupt(STARTPIN, isr0, FALLING);
+  
+  // Only attach interrupts for END and RAZZ (START uses polling)
   attachInterrupt(ENDPIN, isr1, RISING);
   attachInterrupt(RAZZPIN, isr2, RISING);
 
+  // Initialize accelData to center
+  accelData.x = 0;
+  accelData.y = 0;
+  accelData.z = 0;
+  
+  // Center servos on startup
+  pwm0 = SERVO_CENTER0;
+  pwm1 = SERVO_CENTER1;
+  pca9685.setPWM(SER0, 0, SERVO_CENTER0);
+  pca9685.setPWM(SER1, 0, SERVO_CENTER1);
+  
   updateDisplay("Starting");
-  //delay(1000);
+  delay(500);
 }
 
 void loop() {
-
-  onStart = !(digitalRead(STARTPIN)); //TO DO: is this dumb?
-
-  if (onStart) {  // ready to start
-    onEnd = false;
-    hasEnded = false;
-    isProgressing = false;
-    Serial.println("OnStart");
-    // check this
-    centerServos();
-    updateDisplay("Ready!");
-
-    if (playingTrack()) {
-      if (myDFPlayer.readCurrentFileNumber() != 1) {
-        myDFPlayer.play(1);
-      }       // if currently playing track 1, do nothing. let it go
-    } else {  // not currently playing
-      myDFPlayer.play(1);
-    }
-  }
-
-  if (!onStart && !onEnd) {  // In progress
-                             // first time, start track 2
-    Serial.println("InProgress");
-    controlServos();
-    updateDisplay(getTime());
-
-    if (isProgressing == false) {  // start song on first in progress
-      myDFPlayer.play(2);
-      isProgressing = true;
-    } else {  // normal non razzed in progress state - Razz is false
-      if (!playingTrack()) {
-        myDFPlayer.play(2); // TO DO: consider how to make the song resume from last position if razzed
-      }
-    }
-
-    if (razz) {
-      if (isRazzing == false) {  // check this
-        myDFPlayer.play(4);
-        isRazzing = true;
-      } else {
-        if (!playingTrack()) {
-          razz = false;  // need to capture state so the razz sound can finish. maybe if (isRazzing == true)
-          isRazzing = false;
+  // Poll for ball on start position
+  bool ballOnStart = (digitalRead(STARTPIN) == LOW);
+  bool ballOnEnd = (digitalRead(ENDPIN) == HIGH);
+  
+  switch(gameState) {
+    case WAITING_FOR_START:
+      if (ballOnStart) {
+        Serial.println("Ball on start position");
+        centerServos();
+        updateDisplay("Ready!");
+        
+        // Play ready track
+        if (!isPlayingTrack() || myDFPlayer.readCurrentFileNumber() != 1) {
+          myDFPlayer.play(1);
         }
       }
-    }
+      
+      // Detect when ball leaves start (game begins)
+      if (!ballOnStart && wasBallOnStart) {
+        gameState = IN_PROGRESS;
+        isProgressing = false;
+        intStartMillis = millis();
+        Serial.println("Game started!");
+      }
+      
+      wasBallOnStart = ballOnStart;
+      break;
+      
+    case IN_PROGRESS:
+      Serial.println("In progress");
+      controlServos();
+      updateDisplay(getTime());
+      
+      // Start progress music on first loop
+      if (!isProgressing) {
+        myDFPlayer.play(2);
+        isProgressing = true;
+      } else if (!isPlayingTrack() && !razz) {
+        // Resume progress music if stopped (and not razzing)
+        myDFPlayer.play(2);
+      }
+      
+      // Handle razz (obstacle hit)
+      if (razz) {
+        if (!isRazzing) {
+          myDFPlayer.play(4);
+          isRazzing = true;
+        } else {
+          // Wait for razz sound to finish
+          if (!isPlayingTrack()) {
+            razz = false;
+            isRazzing = false;
+          }
+        }
+      }
+      break;
+      
+    case ENDED:
+      Serial.println("Game ended!");
+      String finalTime = getTime();
+      updateDisplay(finalTime);
+      myDFPlayer.play(3);
+      centerServos();
+      
+      // Wait for servos to center before checking for restart
+      delay(1000);
+      
+      // Stay in ENDED state until ball is placed back on start
+      while (gameState == ENDED) {
+        ballOnStart = (digitalRead(STARTPIN) == LOW);
+        if (ballOnStart) {
+          gameState = WAITING_FOR_START;
+          isProgressing = false;
+          razz = false;
+          isRazzing = false;
+          Serial.println("Reset to start - ready for new game");
+          updateDisplay("Ready!");
+          break;
+        }
+        delay(100);
+      }
+      break;
   }
-
-  if (!onStart && onEnd && !hasEnded) {  // End (only once)
-    Serial.println("OnEnd");
-    updateDisplay(getTime());
-    myDFPlayer.play(3);
-    centerServos();
-    hasEnded = true;
-  }
-
-  // on loops after hasEnded is true, nothing happens
-
-  delay(40);  // need?
+  
+  delay(40);
 }
