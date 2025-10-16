@@ -39,9 +39,18 @@ Adafruit_PWMServoDriver pca9685 = Adafruit_PWMServoDriver(0x40);
 #define SER1 1  // Servo Motor 1 on connector 1
 int pwm0;       // PWM to drive servos
 int pwm1;
+int targetPwm0; // Target PWM values for smooth movement
+int targetPwm1;
 
-#define MAXDIFF 15  // to limit really rapid changes
+// Smoothing and limiting parameters
+#define MAX_CHANGE_PER_LOOP 3   // Maximum PWM change per 40ms loop (smoother movement)
+#define DEADZONE 2              // Ignore small accel changes (reduces jitter)
+#define SMOOTHING_FACTOR 0.3    // Low-pass filter (0.0-1.0, lower = smoother)
 const int SENSOR_RANGE = 50;
+
+// Smoothed accelerometer values
+float smoothedX = 0;
+float smoothedY = 0;
 
 #define STARTPIN 18
 #define ENDPIN 19
@@ -113,20 +122,58 @@ bool isPlayingTrack() {
 }
 
 void controlServos() {
+  // Apply low-pass filter for smoother values (exponential moving average)
+  smoothedX = (SMOOTHING_FACTOR * accelData.x) + ((1.0 - SMOOTHING_FACTOR) * smoothedX);
+  smoothedY = (SMOOTHING_FACTOR * accelData.y) + ((1.0 - SMOOTHING_FACTOR) * smoothedY);
+  
+  // Apply deadzone to ignore tiny movements
+  float effectiveX = (abs(smoothedX) < DEADZONE) ? 0 : smoothedX;
+  float effectiveY = (abs(smoothedY) < DEADZONE) ? 0 : smoothedY;
+  
+  // Calculate target PWM values
+  targetPwm0 = map(effectiveX, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
+  targetPwm1 = map(effectiveY, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
+  
+  // Constrain targets to valid range
+  targetPwm0 = constrain(targetPwm0, SERVOMIN, SERVOMAX);
+  targetPwm1 = constrain(targetPwm1, SERVOMIN, SERVOMAX);
+  
+  // Gradually move toward target (rate limiting)
+  int diff0 = targetPwm0 - pwm0;
+  if (diff0 > MAX_CHANGE_PER_LOOP) {
+    pwm0 += MAX_CHANGE_PER_LOOP;
+  } else if (diff0 < -MAX_CHANGE_PER_LOOP) {
+    pwm0 -= MAX_CHANGE_PER_LOOP;
+  } else {
+    pwm0 = targetPwm0;  // Close enough, snap to target
+  }
+  
+  int diff1 = targetPwm1 - pwm1;
+  if (diff1 > MAX_CHANGE_PER_LOOP) {
+    pwm1 += MAX_CHANGE_PER_LOOP;
+  } else if (diff1 < -MAX_CHANGE_PER_LOOP) {
+    pwm1 -= MAX_CHANGE_PER_LOOP;
+  } else {
+    pwm1 = targetPwm1;  // Close enough, snap to target
+  }
+  
+  // Apply to servos
+  pca9685.setPWM(SER0, 0, pwm0);
+  pca9685.setPWM(SER1, 0, pwm1);
+  
+  // Debug output (optional - comment out for production)
   Serial.print("X: ");
   Serial.print(accelData.x);
-  Serial.print(" -> PWM: ");
-  Serial.print(map(accelData.x, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX));
-  Serial.print(", Y: ");
+  Serial.print(" (smooth: ");
+  Serial.print(smoothedX, 1);
+  Serial.print(") -> PWM: ");
+  Serial.print(pwm0);
+  Serial.print(" | Y: ");
   Serial.print(accelData.y);
-  Serial.print(" -> PWM: ");
-  Serial.println(map(accelData.y, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX));
-  
-  pwm0 = map(accelData.x, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  pca9685.setPWM(SER0, 0, pwm0);
-  
-  pwm1 = map(accelData.y, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  pca9685.setPWM(SER1, 0, pwm1);
+  Serial.print(" (smooth: ");
+  Serial.print(smoothedY, 1);
+  Serial.print(") -> PWM: ");
+  Serial.println(pwm1);
 }
 
 void centerServos() {
@@ -204,14 +251,18 @@ void setup() {
   attachInterrupt(ENDPIN, isr1, RISING);
   attachInterrupt(RAZZPIN, isr2, RISING);
 
-  // Initialize accelData to center
+  // Initialize accelData and smoothing to center
   accelData.x = 0;
   accelData.y = 0;
   accelData.z = 0;
+  smoothedX = 0;
+  smoothedY = 0;
   
   // Center servos on startup
   pwm0 = SERVO_CENTER0;
   pwm1 = SERVO_CENTER1;
+  targetPwm0 = SERVO_CENTER0;
+  targetPwm1 = SERVO_CENTER1;
   pca9685.setPWM(SER0, 0, SERVO_CENTER0);
   pca9685.setPWM(SER1, 0, SERVO_CENTER1);
   
