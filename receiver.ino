@@ -257,30 +257,39 @@ void loop() {
       break;
       
     case IN_PROGRESS:
-      Serial.println("In progress");
+      // Control servos based on accelerometer data
       controlServos();
+      
+      // Update display with elapsed time
       updateDisplay(getTime());
       
-      // Start progress music on first loop
-      if (!isProgressing) {
-        myDFPlayer.play(2);
-        isProgressing = true;
-      } else if (!isPlayingTrack() && !razz) {
-        // Resume progress music if stopped (and not razzing)
-        myDFPlayer.play(2);
-      }
-      
-      // Handle razz (obstacle hit)
+      // Music management: Track 2 loops, interrupted by Track 4 for razz
       if (razz) {
+        // Razz interrupt: play track 4
         if (!isRazzing) {
+          Serial.println("Razz detected - playing track 4");
           myDFPlayer.play(4);
           isRazzing = true;
         } else {
-          // Wait for razz sound to finish
+          // Wait for razz sound to finish before resuming track 2
           if (!isPlayingTrack()) {
+            Serial.println("Razz complete - resuming track 2");
+            myDFPlayer.play(2);  // Resume progress music
             razz = false;
             isRazzing = false;
           }
+        }
+      } else {
+        // Normal progress state: ensure track 2 is playing
+        if (!isProgressing) {
+          // First entry into IN_PROGRESS - start track 2
+          Serial.println("Starting progress music (track 2)");
+          myDFPlayer.play(2);
+          isProgressing = true;
+        } else if (!isPlayingTrack()) {
+          // Track 2 finished - restart it (loop behavior)
+          Serial.println("Track 2 completed - restarting");
+          myDFPlayer.play(2);
         }
       }
       break;
