@@ -231,10 +231,18 @@ void loop() {
         centerServos();
         updateDisplay("Ready!");
         
-        // Play ready track
-        if (!isPlayingTrack() || myDFPlayer.readCurrentFileNumber() != 1) {
+        // Ensure track 1 is playing - switch if different track, restart if finished
+        int currentTrack = myDFPlayer.readCurrentFileNumber();
+        if (!isPlayingTrack()) {
+          // Track finished or not playing - start track 1
           myDFPlayer.play(1);
+          Serial.println("Starting track 1");
+        } else if (currentTrack != 1) {
+          // Wrong track playing - switch to track 1
+          myDFPlayer.play(1);
+          Serial.println("Switching to track 1");
         }
+        // If track 1 is already playing, do nothing
       }
       
       // Detect when ball leaves start (game begins)
