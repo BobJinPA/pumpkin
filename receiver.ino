@@ -10,7 +10,7 @@
 // TO DO: Add code to run addressable LEDs on the game platform
 
 // Debug mode - set to false for production to improve performance
-#define DEBUG_MODE true
+#define DEBUG_MODE false
 
 #if DEBUG_MODE
   #define DEBUG_PRINT(x) Serial.print(x)
