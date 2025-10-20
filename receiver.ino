@@ -1,5 +1,6 @@
 // Ball Maze Controller with ESP-NOW
 // Non-blocking audio - servos work even if DFPlayer fails
+// Updated with symmetric servo ranges around center positions
 
 // files on SD for DFPlayer
 // 1 - ready to start
@@ -46,11 +47,19 @@ typedef struct struct_message {
 struct_message accelData;
 
 Adafruit_PWMServoDriver pca9685 = Adafruit_PWMServoDriver(0x40);
-#define SERVOMIN 290  // Minimum value
-#define SERVOMAX 390  // Maximum value
 
-#define SERVO_CENTER0 342  // adjust to center board 0 x
-#define SERVO_CENTER1 340  // adjust to center board 1 y
+// Servo center positions (calibrated)
+#define SERVO_CENTER0 348  // adjust to center board 0 x
+#define SERVO_CENTER1 330  // adjust to center board 1 y
+
+// Define range as offset from center (±50 gives 100 total range)
+#define SERVO_RANGE 50  // Maximum deviation from center in either direction
+
+// Calculate min/max for each servo based on its center
+#define SERVOMIN0 (SERVO_CENTER0 - SERVO_RANGE)  // 298
+#define SERVOMAX0 (SERVO_CENTER0 + SERVO_RANGE)  // 398
+#define SERVOMIN1 (SERVO_CENTER1 - SERVO_RANGE)  // 280
+#define SERVOMAX1 (SERVO_CENTER1 + SERVO_RANGE)  // 380
 
 #define SER0 0  // Servo Motor 0 on connector 0
 #define SER1 1  // Servo Motor 1 on connector 1
@@ -182,13 +191,13 @@ void controlServos() {
   float effectiveX = (abs(smoothedX) < DEADZONE) ? 0 : smoothedX;
   float effectiveY = (abs(smoothedY) < DEADZONE) ? 0 : smoothedY;
   
-  // Calculate target PWM values
-  targetPwm0 = map(effectiveX, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
-  targetPwm1 = map(effectiveY, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN, SERVOMAX);
+  // Calculate target PWM values using servo-specific ranges
+  targetPwm0 = map(effectiveX, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN0, SERVOMAX0);
+  targetPwm1 = map(effectiveY, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN1, SERVOMAX1);
   
-  // Constrain targets to valid range
-  targetPwm0 = constrain(targetPwm0, SERVOMIN, SERVOMAX);
-  targetPwm1 = constrain(targetPwm1, SERVOMIN, SERVOMAX);
+  // Constrain targets to valid range for each servo
+  targetPwm0 = constrain(targetPwm0, SERVOMIN0, SERVOMAX0);
+  targetPwm1 = constrain(targetPwm1, SERVOMIN1, SERVOMAX1);
   
   // Gradually move toward target (rate limiting)
   int diff0 = targetPwm0 - pwm0;
@@ -343,6 +352,16 @@ void setup() {
   Serial.println(SERVO_CENTER0);
   Serial.print("Servo 1 PWM: ");
   Serial.println(SERVO_CENTER1);
+  
+  // Print servo ranges for debugging
+  Serial.print("Servo 0 range: ");
+  Serial.print(SERVOMIN0);
+  Serial.print(" to ");
+  Serial.println(SERVOMAX0);
+  Serial.print("Servo 1 range: ");
+  Serial.print(SERVOMIN1);
+  Serial.print(" to ");
+  Serial.println(SERVOMAX1);
   
   updateDisplay("START");
   Serial.println("=== Setup Complete - Waiting for ball ===\n");
