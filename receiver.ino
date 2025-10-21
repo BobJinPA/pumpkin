@@ -1,5 +1,6 @@
 // Ball Maze Controller with ESP-NOW
 // Non-blocking audio - servos work even if DFPlayer fails
+// FIXED: Track 2 now loops properly during gameplay
 
 // files on SD for DFPlayer
 // 1 - ready to start
@@ -130,10 +131,10 @@ bool debouncedEndState = HIGH;
 // callback function that will be executed when data is received
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   memcpy(&accelData, incomingData, sizeof(accelData));
-  Serial.print("Data received - X: ");
-  Serial.print(accelData.x);
-  Serial.print(" Y: ");
-  Serial.println(accelData.y);
+  // Serial.print("Data received - X: ");
+  // Serial.print(accelData.x);
+  // Serial.print(" Y: ");
+  // Serial.println(accelData.y);
 }
 
 // Interrupt for end position (with debouncing)
@@ -289,18 +290,18 @@ void centerServos() {
   // Update PWM tracking variables
   pwm0 = SERVO_CENTER0;
   pwm1 = SERVO_CENTER1;
-  
-  Serial.println("Servos centered");
 }
 
 void setup() {
   Serial.begin(115200);
   delay(500);
-  Serial.println("\n\n=== Ball Maze Controller Starting ===");
+  Serial.println("\n\n=================================");
+  Serial.println("Ball Maze Controller Starting...");
+  Serial.println("=================================");
   
-  // Initialize display first
-  displaySerial.begin(38400, SERIAL_8N1, 26, 27);
-  updateDisplay("INIT");
+  // Initialize display serial first
+  displaySerial.begin(38400, SERIAL_8N1, 26, 27);  // TX=27
+  Serial.println("Display serial initialized");
   
   // Try to initialize DFPlayer (non-blocking if it fails)
   Serial.println("Attempting DFPlayer initialization...");
@@ -461,23 +462,28 @@ void loop() {
         } else {
           // Wait for razz sound to finish before resuming track 2
           if (isTrackFinished()) {
-            //Serial.println("Razz complete - resuming track 2");
+            Serial.println("Razz complete - resuming track 2");
             playTrack(2);
             razz = false;
             isRazzing = false;
           }
         }
       } else {
+        // Normal progress state: ensure track 2 is playing and looping
         if (!isProgressing) {
           Serial.println("Starting progress music (track 2)");
           playTrack(2);
           isProgressing = true;
+          lastMusicCheck = millis();  // Initialize music check timer
         } else {
-          // Check if track 2 finished and restart it (loop behavior)
-          // if (isTrackFinished() && currentlyPlayingTrack == 2) {
-          //   Serial.println("Track 2 completed - restarting");
-          //   playTrack(2);
-          // }
+          // FIXED: Periodic check to ensure track 2 keeps looping
+          if (millis() - lastMusicCheck >= MUSIC_CHECK_INTERVAL) {
+            if (isTrackFinished() && currentlyPlayingTrack == 2) {
+              Serial.println("Track 2 completed - restarting");
+              playTrack(2);
+            }
+            lastMusicCheck = millis();
+          }
         }
       }
       
