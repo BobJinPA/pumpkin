@@ -84,6 +84,9 @@ float smoothedY = 0;
 #define ENDPIN 19
 #define RAZZPIN 25
 
+unsigned long lastTrackStartTime = 0;
+#define TRACK_START_GRACE_PERIOD 200  // Wait 200ms after starting track before checking if finished
+
 // Game state machine
 enum GameState {
   WAITING_FOR_START,
@@ -95,7 +98,7 @@ GameState gameState = WAITING_FOR_START;
 
 // State flags
 bool isProgressing = false;
-bool razz = false;
+volatile bool razz = false;
 bool isRazzing = false;
 
 // Timing variables for interrupts
@@ -127,10 +130,10 @@ bool debouncedEndState = HIGH;
 // callback function that will be executed when data is received
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   memcpy(&accelData, incomingData, sizeof(accelData));
-  // Serial.print("Data received - X: ");
-  // Serial.print(accelData.x);
-  // Serial.print(" Y: ");
-  // Serial.println(accelData.y);
+  Serial.print("Data received - X: ");
+  Serial.print(accelData.x);
+  Serial.print(" Y: ");
+  Serial.println(accelData.y);
 }
 
 // Interrupt for end position (with debouncing)
@@ -160,15 +163,19 @@ String getTime() {
 }
 
 void updateDisplay(String displayValue) {
-  Serial.println(displayValue);
+  //Serial.println(displayValue);
   displaySerial.println(displayValue);
 }
 
 bool isTrackFinished() {
   if (!audioAvailable) return true;  // If no audio, always report finished
   
+  // Don't check BUSY pin for a grace period after starting track
+  if (millis() - lastTrackStartTime < TRACK_START_GRACE_PERIOD) {
+    return false;  // Track just started, definitely not finished yet
+  }
+  
   // Read BUSY pin: LOW = playing, HIGH = idle/finished
-  // Note: BUSY pin goes HIGH when track finishes
   return (digitalRead(DFPLAYER_BUSY_PIN) == HIGH);
 }
 
@@ -180,6 +187,7 @@ void playTrack(int trackNumber) {
   
   myDFPlayer.play(trackNumber);
   currentlyPlayingTrack = trackNumber;
+  lastTrackStartTime = millis();  // Record when track started
   Serial.print("Playing track ");
   Serial.println(trackNumber);
 }
@@ -230,14 +238,14 @@ void controlServos() {
   static int lastPrintedPwm0 = 0;
   static int lastPrintedPwm1 = 0;
   if (abs(pwm0 - lastPrintedPwm0) > 10 || abs(pwm1 - lastPrintedPwm1) > 10) {
-    Serial.print("Servo - X: ");
-    Serial.print(accelData.x);
-    Serial.print(" -> PWM: ");
-    Serial.print(pwm0);
-    Serial.print(" | Y: ");
-    Serial.print(accelData.y);
-    Serial.print(" -> PWM: ");
-    Serial.println(pwm1);
+    // Serial.print("Servo - X: ");
+    // Serial.print(accelData.x);
+    // Serial.print(" -> PWM: ");
+    // Serial.print(pwm0);
+    // Serial.print(" | Y: ");
+    // Serial.print(accelData.y);
+    // Serial.print(" -> PWM: ");
+    // Serial.println(pwm1);
     lastPrintedPwm0 = pwm0;
     lastPrintedPwm1 = pwm1;
   }
@@ -334,7 +342,7 @@ void setup() {
   // Only attach interrupts for END and RAZZ (START uses polling)
   attachInterrupt(ENDPIN, isr1, RISING);
   attachInterrupt(RAZZPIN, isr2, RISING);
-  Serial.println("Interrupts configured");
+  //Serial.println("Interrupts configured");
 
   // Initialize accelData and smoothing to center
   accelData.x = 0;
@@ -352,10 +360,10 @@ void setup() {
   Serial.println("Setting servos to center position...");
   pca9685.setPWM(SER0, 0, SERVO_CENTER0);
   pca9685.setPWM(SER1, 0, SERVO_CENTER1);
-  Serial.print("Servo 0 PWM: ");
-  Serial.println(SERVO_CENTER0);
-  Serial.print("Servo 1 PWM: ");
-  Serial.println(SERVO_CENTER1);
+  // Serial.print("Servo 0 PWM: ");
+  // Serial.println(SERVO_CENTER0);
+  // Serial.print("Servo 1 PWM: ");
+  // Serial.println(SERVO_CENTER1);
   
   updateDisplay("START");
   Serial.println("=== Setup Complete - Waiting for ball ===\n");
@@ -453,7 +461,7 @@ void loop() {
         } else {
           // Wait for razz sound to finish before resuming track 2
           if (isTrackFinished()) {
-            Serial.println("Razz complete - resuming track 2");
+            //Serial.println("Razz complete - resuming track 2");
             playTrack(2);
             razz = false;
             isRazzing = false;
@@ -466,10 +474,10 @@ void loop() {
           isProgressing = true;
         } else {
           // Check if track 2 finished and restart it (loop behavior)
-          if (isTrackFinished() && currentlyPlayingTrack == 2) {
-            Serial.println("Track 2 completed - restarting");
-            playTrack(2);
-          }
+          // if (isTrackFinished() && currentlyPlayingTrack == 2) {
+          //   Serial.println("Track 2 completed - restarting");
+          //   playTrack(2);
+          // }
         }
       }
       
@@ -549,5 +557,5 @@ void loop() {
       break;
   }
   
-  delay(40);
+  //delay(40);
 }
