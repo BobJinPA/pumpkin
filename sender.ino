@@ -28,6 +28,7 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 void setup() {
   // Init Serial Monitor
   Serial.begin(115200);
+  Serial.println("Ball Maze Sender - Initializing...");
 
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
@@ -52,12 +53,13 @@ void setup() {
     Serial.println("Failed to add peer");
     return;
   }
+  
+  Serial.println("Initializing ADXL345...");
   adxl.powerOn();                     // Power on the ADXL345
 
-  adxl.setRangeSetting(16);           // Give the range settings
+  adxl.setRangeSetting(2);            // CHANGED: 2g range for tilt sensitivity (was 16g)
                                       // Accepted values are 2g, 4g, 8g or 16g
-                                      // Higher Values = Wider Measurement Range
-                                      // Lower Values = Greater Sensitivity
+                                      // Lower Values = Greater Sensitivity (better for tilt)
 
   adxl.setSpiBit(0);                  // Configure the device to be in 4 wire SPI mode when set to '0' or 3 wire SPI mode when set to 1
                                       // Default: Set to 1
@@ -93,26 +95,43 @@ void setup() {
   adxl.FreeFallINT(1);
   adxl.doubleTapINT(1);
   adxl.singleTapINT(1);
+  
+  Serial.println("Setup complete - starting to send data");
 }
 
 void loop() {
-
   int x, y, z;
   adxl.readAccel(&x, &y, &z);
-  //Serial.println(x);
-  // Set values to send
-  accelData.x = x;
-  accelData.y = y;
-  accelData.z = z;
-  //Serial.println(accelData.x);
+  
+  // Scale raw accelerometer values to ±50 range expected by receiver
+  // ADXL345 with 2g range returns roughly -256 to +256
+  accelData.x = map(x, -256, 256, -50, 50);
+  accelData.y = map(y, -256, 256, -50, 50);
+  accelData.z = map(z, -256, 256, -50, 50);
+  
+  // Constrain to expected range
+  accelData.x = constrain(accelData.x, -50, 50);
+  accelData.y = constrain(accelData.y, -50, 50);
+  accelData.z = constrain(accelData.z, -50, 50);
 
   // Send message via ESP-NOW
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&accelData, sizeof(accelData));
 
-  if (result == ESP_OK) {
-    Serial.println("Sent with success");
-  } else {
-    Serial.println("Error sending the data");
+  // Debug output (reduced frequency - only once per second)
+  static unsigned long lastPrint = 0;
+  if (millis() - lastPrint > 1000) {
+    Serial.print("Raw: X:");
+    Serial.print(x);
+    Serial.print(" Y:");
+    Serial.print(y);
+    Serial.print(" -> Scaled: X:");
+    Serial.print(accelData.x);
+    Serial.print(" Y:");
+    Serial.print(accelData.y);
+    Serial.print(" | Status: ");
+    Serial.println(result == ESP_OK ? "OK" : "FAIL");
+    lastPrint = millis();
   }
+  
   delay(40);
 }
