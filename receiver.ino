@@ -1,6 +1,5 @@
 // Ball Maze Controller with ESP-NOW
 // Non-blocking audio - servos work even if DFPlayer fails
-// Updated with symmetric servo ranges around center positions
 
 // files on SD for DFPlayer
 // 1 - ready to start
@@ -48,18 +47,21 @@ struct_message accelData;
 
 Adafruit_PWMServoDriver pca9685 = Adafruit_PWMServoDriver(0x40);
 
-// Servo center positions (calibrated)
-#define SERVO_CENTER0 348  // adjust to center board 0 x
-#define SERVO_CENTER1 330  // adjust to center board 1 y
+// Servo 0 (X-axis) limits
+// #define SERVO0MIN 281  // Minimum value (331 - 50)
+// #define SERVO0MAX 381  // Maximum value (331 + 50)
+#define SERVO_CENTER0 331  // adjust to center board 0 x
 
-// Define range as offset from center (±50 gives 100 total range)
-#define SERVO_RANGE 50  // Maximum deviation from center in either direction
+// Servo 1 (Y-axis) limits
+// #define SERVO1MIN 287  // Minimum value (337 - 50)
+// #define SERVO1MAX 387  // Maximum value (337 + 50)
+#define SERVO_CENTER1 375  // adjust to center board 1 y
+#define SERVO_RANGE 50
 
-// Calculate min/max for each servo based on its center
-#define SERVOMIN0 (SERVO_CENTER0 - SERVO_RANGE)  // 298
-#define SERVOMAX0 (SERVO_CENTER0 + SERVO_RANGE)  // 398
-#define SERVOMIN1 (SERVO_CENTER1 - SERVO_RANGE)  // 280
-#define SERVOMAX1 (SERVO_CENTER1 + SERVO_RANGE)  // 380
+#define SERVO0MIN (SERVO_CENTER0 - SERVO_RANGE)  // X
+#define SERVO0MAX (SERVO_CENTER0 + SERVO_RANGE)  // X
+#define SERVO1MIN (SERVO_CENTER1 - SERVO_RANGE)  // Y
+#define SERVO1MAX (SERVO_CENTER1 + SERVO_RANGE)  // Y
 
 #define SER0 0  // Servo Motor 0 on connector 0
 #define SER1 1  // Servo Motor 1 on connector 1
@@ -69,9 +71,9 @@ int targetPwm0; // Target PWM values for smooth movement
 int targetPwm1;
 
 // Smoothing and limiting parameters
-#define MAX_CHANGE_PER_LOOP 3   // Maximum PWM change per 40ms loop (smoother movement)
+#define MAX_CHANGE_PER_LOOP 8   // Maximum PWM change per 40ms loop (increased from 3 for faster response)
 #define DEADZONE 2              // Ignore small accel changes (reduces jitter)
-#define SMOOTHING_FACTOR 0.3    // Low-pass filter (0.0-1.0, lower = smoother)
+#define SMOOTHING_FACTOR 0.5    // Low-pass filter (0.0-1.0, higher = more responsive, was 0.3)
 const int SENSOR_RANGE = 50;
 
 // Smoothed accelerometer values
@@ -125,10 +127,10 @@ bool debouncedEndState = HIGH;
 // callback function that will be executed when data is received
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   memcpy(&accelData, incomingData, sizeof(accelData));
-  Serial.print("Data received - X: ");
-  Serial.print(accelData.x);
-  Serial.print(" Y: ");
-  Serial.println(accelData.y);
+  // Serial.print("Data received - X: ");
+  // Serial.print(accelData.x);
+  // Serial.print(" Y: ");
+  // Serial.println(accelData.y);
 }
 
 // Interrupt for end position (with debouncing)
@@ -158,6 +160,7 @@ String getTime() {
 }
 
 void updateDisplay(String displayValue) {
+  Serial.println(displayValue);
   displaySerial.println(displayValue);
 }
 
@@ -182,7 +185,7 @@ void playTrack(int trackNumber) {
 }
 
 void controlServos() {
-  Serial.println("inside control servos");
+  //Serial.println("inside control servos");
   // Apply low-pass filter for smoother values (exponential moving average)
   smoothedX = (SMOOTHING_FACTOR * accelData.x) + ((1.0 - SMOOTHING_FACTOR) * smoothedX);
   smoothedY = (SMOOTHING_FACTOR * accelData.y) + ((1.0 - SMOOTHING_FACTOR) * smoothedY);
@@ -191,13 +194,14 @@ void controlServos() {
   float effectiveX = (abs(smoothedX) < DEADZONE) ? 0 : smoothedX;
   float effectiveY = (abs(smoothedY) < DEADZONE) ? 0 : smoothedY;
   
-  // Calculate target PWM values using servo-specific ranges
-  targetPwm0 = map(effectiveX, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN0, SERVOMAX0);
-  targetPwm1 = map(effectiveY, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVOMIN1, SERVOMAX1);
+  // Calculate target PWM values
+  targetPwm0 = map(effectiveX, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVO0MIN, SERVO0MAX);
+  // REVERSED Y AXIS MAPPING - swap min/max parameters
+  targetPwm1 = map(effectiveY, (SENSOR_RANGE * -1), SENSOR_RANGE, SERVO1MAX, SERVO1MIN);
   
-  // Constrain targets to valid range for each servo
-  targetPwm0 = constrain(targetPwm0, SERVOMIN0, SERVOMAX0);
-  targetPwm1 = constrain(targetPwm1, SERVOMIN1, SERVOMAX1);
+  // Constrain targets to valid range
+  targetPwm0 = constrain(targetPwm0, SERVO0MIN, SERVO0MAX);
+  targetPwm1 = constrain(targetPwm1, SERVO1MIN, SERVO1MAX);
   
   // Gradually move toward target (rate limiting)
   int diff0 = targetPwm0 - pwm0;
@@ -353,16 +357,6 @@ void setup() {
   Serial.print("Servo 1 PWM: ");
   Serial.println(SERVO_CENTER1);
   
-  // Print servo ranges for debugging
-  Serial.print("Servo 0 range: ");
-  Serial.print(SERVOMIN0);
-  Serial.print(" to ");
-  Serial.println(SERVOMAX0);
-  Serial.print("Servo 1 range: ");
-  Serial.print(SERVOMIN1);
-  Serial.print(" to ");
-  Serial.println(SERVOMAX1);
-  
   updateDisplay("START");
   Serial.println("=== Setup Complete - Waiting for ball ===\n");
   delay(500);
@@ -401,19 +395,21 @@ void loop() {
   
   switch(gameState) {
     case WAITING_FOR_START:
-      // Continuously reset smoothing to prevent pre-game tilt accumulation
-      smoothedX = 0;
-      smoothedY = 0;
+      // Reset smoothing only when ball first arrives on start
+      if (ballOnStart && !wasBallOnStart) {
+        // Ball just arrived on start
+        Serial.println("Ball placed on start position");
+        smoothedX = 0;
+        smoothedY = 0;
+        centerServos();
+        updateDisplay("Ready!");
+        playTrack(1);  // Play ready sound
+        wasBallOnStart = true;
+      }
       
       if (ballOnStart) {
-        // Ball is on start position
-        if (!wasBallOnStart) {
-          // Ball just arrived on start
-          Serial.println("Ball placed on start position");
-          centerServos();
-          updateDisplay("Ready!");
-          playTrack(1);  // Play ready sound
-        }
+        // Ball is on start position - SERVOS ACTIVE for practice
+        controlServos();  // Allow user to control servos while waiting
         
         // While ball is on start, keep ready track playing
         if (millis() - lastMusicCheck >= MUSIC_CHECK_INTERVAL) {
@@ -422,8 +418,6 @@ void loop() {
           }
           lastMusicCheck = millis();
         }
-        
-        wasBallOnStart = true;  // Update state: ball is on start
       } else {
         // Ball is NOT on start position
         if (wasBallOnStart) {
@@ -437,7 +431,7 @@ void loop() {
         
         wasBallOnStart = false;  // Update state: ball is not on start
       }
-      delay(50);
+      delay(40);  // Changed from 50 to match IN_PROGRESS timing
       break;
       
     case IN_PROGRESS:
