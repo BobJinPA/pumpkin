@@ -1,7 +1,6 @@
-
 // Ball Maze Controller with ESP-NOW
 // Non-blocking audio - servos work even if DFPlayer fails
-// FIXED: Track 2 now loops properly during gameplay
+// FIXED: Track 2 now loops properly during gameplay with improved debouncing
 
 // files on SD for DFPlayer
 // 1 - ready to start
@@ -87,7 +86,12 @@ float smoothedY = 0;
 #define RAZZPIN 25
 
 unsigned long lastTrackStartTime = 0;
-#define TRACK_START_GRACE_PERIOD 200  // Wait 200ms after starting track before checking if finished
+#define TRACK_START_GRACE_PERIOD 1000  // INCREASED: Wait 1000ms after starting track before checking if finished
+
+// Track 2 debouncing to prevent premature restarts
+unsigned long track2FinishedTime = 0;
+bool track2WasFinished = false;
+#define TRACK2_RESTART_DEBOUNCE 800  // Wait 800ms of continuous "finished" state before restarting
 
 // Game state machine
 enum GameState {
@@ -190,6 +194,11 @@ void playTrack(int trackNumber) {
   myDFPlayer.play(trackNumber);
   currentlyPlayingTrack = trackNumber;
   lastTrackStartTime = millis();  // Record when track started
+  
+  // Reset Track 2 debouncing when starting any track
+  track2WasFinished = false;
+  track2FinishedTime = 0;
+  
   Serial.print("Playing track ");
   Serial.println(trackNumber);
 }
@@ -413,7 +422,7 @@ void loop() {
         smoothedY = 0;
         centerServos();
         updateDisplay("Ready!");
-        playTrack(1);  // Play ready sound
+        playTrack(4);  // Play ready sound
         wasBallOnStart = true;
       }
       
@@ -424,7 +433,7 @@ void loop() {
         // While ball is on start, keep ready track playing
         if (millis() - lastMusicCheck >= MUSIC_CHECK_INTERVAL) {
           if (isTrackFinished() && currentlyPlayingTrack != 1) {
-            playTrack(1);
+            playTrack(4);
           }
           lastMusicCheck = millis();
         }
@@ -458,7 +467,7 @@ void loop() {
       if (razz) {
         if (!isRazzing) {
           Serial.println("Razz detected - playing track 4");
-          playTrack(4);
+          playTrack(1);
           isRazzing = true;
         } else {
           // Wait for razz sound to finish before resuming track 2
@@ -477,11 +486,30 @@ void loop() {
           isProgressing = true;
           lastMusicCheck = millis();  // Initialize music check timer
         } else {
-          // FIXED: Periodic check to ensure track 2 keeps looping
+          // IMPROVED: Check Track 2 status with debouncing to prevent premature restarts
           if (millis() - lastMusicCheck >= MUSIC_CHECK_INTERVAL) {
-            if (isTrackFinished() && currentlyPlayingTrack == 2) {
-              Serial.println("Track 2 completed - restarting");
-              playTrack(2);
+            if (currentlyPlayingTrack == 2) {
+              bool trackFinished = isTrackFinished();
+              
+              if (trackFinished) {
+                // Track appears finished
+                if (!track2WasFinished) {
+                  // First detection of finished state - start debounce timer
+                  track2FinishedTime = millis();
+                  track2WasFinished = true;
+                  Serial.println("Track 2 appears finished - starting debounce timer");
+                } else if (millis() - track2FinishedTime >= TRACK2_RESTART_DEBOUNCE) {
+                  // Track has been finished continuously for debounce period - restart it
+                  Serial.println("Track 2 confirmed finished - restarting");
+                  playTrack(2);
+                }
+              } else {
+                // Track is playing - reset debounce state
+                if (track2WasFinished) {
+                  Serial.println("Track 2 still playing - false alarm");
+                }
+                track2WasFinished = false;
+              }
             }
             lastMusicCheck = millis();
           }
@@ -518,12 +546,6 @@ void loop() {
         smoothedY = 0;
         
         if (ballOnEnd) {
-          // Ball still on end - keep track 3 playing/looping
-          if (isTrackFinished() && currentlyPlayingTrack == 3) {
-            playTrack(3);
-            Serial.println("Track 3 completed - restarting");
-          }
-          
           // Check for ball on start to reset
           ballOnStart = (digitalRead(STARTPIN) == LOW);
           if (ballOnStart) {
